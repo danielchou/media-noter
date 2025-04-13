@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QFileDialog, QMessageBox, QSlider, QLabel,
                            QTextBrowser)
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QTextCursor
+from PyQt5.QtGui import QTextCursor, QColor, QFont
 from tinytag import TinyTag
 from mutagen.mp3 import MP3
 from audio_player import AudioPlayer
@@ -145,10 +145,9 @@ class MediaNoter(QMainWindow):
         self.note_edit.mousePressEvent = self.note_edit_mouse_press
         self.note_edit.setReadOnly(False)
         
-        # 設定樣式表
-        self.note_edit.document().setDefaultStyleSheet(
-            "a { color: blue; text-decoration: underline; cursor: pointer; }\n"
-            "a:hover { color: red; }")
+        # 設定編輯器的基本樣式
+        self.note_edit.setStyleSheet(
+            "QTextEdit { padding: 10px; background-color: #f8f9fa; border: 1px solid #ddd; font-family: '微軟正黑體', 'Microsoft JhengHei', Arial, sans-serif; font-size: 12pt; }")
         self.save_btn = QPushButton('保存筆記')
         self.save_btn.clicked.connect(self.save_note)
         
@@ -311,7 +310,13 @@ class MediaNoter(QMainWindow):
         
         # 在筆記中插入時間標記
         cursor = self.note_edit.textCursor()
-        cursor.insertText(f'[{current_time}] ')
+        format = cursor.charFormat()
+        format.setForeground(QColor('#2196F3'))  # 設置藍色
+        format.setFontWeight(QFont.Bold)  # 設置粗體
+        
+        cursor.insertText('[', format)
+        cursor.insertText(current_time, format)
+        cursor.insertText('] ', format)
     
     def note_edit_mouse_press(self, event):
         """處理筆記編輯器的滑鼠點擊事件"""
