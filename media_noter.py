@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QTextCursor
 from tinytag import TinyTag
+from mutagen.mp3 import MP3
 from audio_player import AudioPlayer
 
 class MediaNoter(QMainWindow):
@@ -172,6 +173,7 @@ class MediaNoter(QMainWindow):
             self.scan_mp3_files()
             
     def scan_mp3_files(self):
+        """掃描目錄中的 MP3 文件"""
         self.file_list.clear()
         self.mp3_files = []
         
@@ -180,47 +182,53 @@ class MediaNoter(QMainWindow):
                 if file.lower().endswith('.mp3'):
                     full_path = os.path.join(root, file)
                     self.mp3_files.append(full_path)
-                    display_name = os.path.basename(full_path)
-                    self.file_list.addItem(display_name)
+                    # 讀取 MP3 文件資訊
+                    try:
+                        audio = MP3(full_path)
+                        duration = audio.info.length
+                        duration_str = self.format_time(duration)
+                        display_name = f"{file} [{duration_str}]"
+                    except Exception as e:
+                        print(f"讀取時長錯誤 {file}: {str(e)}")
+                        display_name = file
                     
+                    self.file_list.addItem(display_name)
+            
     def get_note_path(self, mp3_path):
         file_name = os.path.basename(mp3_path)
         note_name = os.path.splitext(file_name)[0] + '.txt'
         return os.path.join(self.notes_dir, note_name)
         
+    def save_note(self):
+        current_index = self.file_list.currentRow()
+        if current_index >= 0:
+            mp3_path = self.mp3_files[current_index]
+            note_path = self.get_note_path(mp3_path)
+            
+            # 直接保存純文字內容
+            text = self.note_edit.toPlainText()
+            with open(note_path, 'w', encoding='utf-8') as f:
+                f.write(text.strip())
+                
+            QMessageBox.information(self, "成功", "筆記已保存！")
+    
     def load_note(self, item):
         current_index = self.file_list.currentRow()
         if current_index >= 0:
             mp3_path = self.mp3_files[current_index]
             note_path = self.get_note_path(mp3_path)
             
-            # 顯示 MP3 資訊
-            try:
-                tag = TinyTag.get(mp3_path)
-                info = f"時長: {int(tag.duration or 0)} 秒\n\n"
-            except Exception as e:
-                info = "無法讀取 MP3 時長\n\n"
+            # 自動播放並從第 5 秒開始
+            self.audio_player.play(mp3_path)
+            self.audio_player.seek(5.0)
+            self.play_btn.setText('暫停')
             
             # 讀取現有筆記
-            content = info
             if os.path.exists(note_path):
                 with open(note_path, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    for line in lines:
-                        if line.startswith('[') and ']' in line:
-                            # 處理時間標記
-                            time_str = line[1:line.index(']')]
-                            try:
-                                minutes, seconds = map(int, time_str.split(':'))
-                                total_seconds = minutes * 60 + seconds
-                                content += f'<a href="time:{total_seconds}" style="color: blue; text-decoration: underline; cursor: pointer;">[{time_str}]</a>'
-                                content += line[line.index(']')+1:]
-                            except:
-                                content += line
-                        else:
-                            content += line
-            
-            self.note_edit.setHtml(content)
+                    self.note_edit.setPlainText(f.read())
+            else:
+                self.note_edit.clear()
                 
     def save_note(self):
         current_index = self.file_list.currentRow()
@@ -228,36 +236,8 @@ class MediaNoter(QMainWindow):
             mp3_path = self.mp3_files[current_index]
             note_path = self.get_note_path(mp3_path)
             
-            # 取得純文字內容
-            html = self.note_edit.toHtml()
-            
-            # 將 HTML 轉換為純文字
-            text = ""
-            for line in html.split('\n'):
-                if '<a href="time:' in line:
-                    # 尋找時間標記
-                    start = line.find('[') + 1
-                    end = line.find(']', start)
-                    if start > 0 and end > start:
-                        time_str = line[start:end]
-                        text += f"[{time_str}]"
-                        # 尋找標記後的文字
-                        text_start = line.find('</a>') + 4
-                        if text_start > 4:
-                            text += line[text_start:].strip()
-                        text += '\n'
-                elif not line.startswith('<!DOCTYPE') and \
-                     not line.startswith('<html') and \
-                     not line.startswith('<head') and \
-                     not line.startswith('<style') and \
-                     not line.startswith('<body') and \
-                     not line.startswith('</') and \
-                     line.strip() != '':
-                    # 移除 HTML 標籤
-                    text += line.replace('<p style=', '').replace('</p>', '')\
-                               .replace('"', '').replace('>', '').strip() + '\n'
-            
-            # 保存純文字內容
+            # 直接保存純文字內容
+            text = self.note_edit.toPlainText()
             with open(note_path, 'w', encoding='utf-8') as f:
                 f.write(text.strip())
                 
@@ -328,21 +308,28 @@ class MediaNoter(QMainWindow):
         """在筆記中標記當前時間點"""
         status = self.audio_player.get_status()
         current_time = self.format_time(status['position'])
-        seconds = status['position']
         
         # 在筆記中插入時間標記
         cursor = self.note_edit.textCursor()
-        html_link = f'<a href="time:{seconds}">[{current_time}]</a> '
-        cursor.insertHtml(html_link)
+        cursor.insertText(f'[{current_time}] ')
     
     def note_edit_mouse_press(self, event):
         """處理筆記編輯器的滑鼠點擊事件"""
-        # 獲取點擊位置的鏈接
-        anchor = self.note_edit.anchorAt(event.pos())
-        if anchor.startswith('time:'):
+        # 獲取點擊位置的文字
+        cursor = self.note_edit.cursorForPosition(event.pos())
+        block = cursor.block().text()
+        
+        # 尋找點擊位置附近的時間標記
+        pos = cursor.positionInBlock()
+        start = block.rfind('[', 0, pos + 1)
+        end = block.find(']', start)
+        
+        if start >= 0 and end > start:
+            time_str = block[start+1:end]
             try:
-                seconds = float(anchor.replace('time:', ''))
-                print(f"測試: 點擊時間標記 {seconds} 秒")
+                minutes, seconds = map(int, time_str.split(':'))
+                total_seconds = minutes * 60 + seconds
+                print(f"測試: 點擊時間標記 {time_str} ({total_seconds} 秒)")
                 
                 current_index = self.file_list.currentRow()
                 if current_index >= 0:
@@ -352,8 +339,8 @@ class MediaNoter(QMainWindow):
                         self.audio_player.play(mp3_path)
                     
                     # 跳轉到指定時間
-                    if self.audio_player.seek(seconds):
-                        print(f"成功跳轉到 {seconds} 秒")
+                    if self.audio_player.seek(float(total_seconds)):
+                        print(f"成功跳轉到 {time_str}")
                     else:
                         print("跳轉失敗")
             except Exception as e:
